@@ -1,0 +1,331 @@
+---
+title: "eda"
+author: "ShufanXia"
+date: "10/12/2021"
+output: html_document
+---
+
+```{r}
+library(ggplot2)
+library(dplyr)
+```
+
+```{r}
+load("./Data/streetrx.RData")
+head(streetrx)
+colnames(streetrx)
+streetrx_morphine <- streetrx[streetrx['api_temp']=="morphine",]
+nrow(streetrx_morphine)
+streetrx_morphine<-na.omit(streetrx_morphine)
+streetrx_morphine <- streetrx_morphine[,! colnames(streetrx_morphine) %in% c("yq_pdate","price_date","city","country","Primary_Reason")] #drop columns
+#drop entry row with = ""
+streetrx_morphine$source <- ifelse(streetrx_morphine$source=="", "Unknown",as.character(streetrx_morphine$source))
+
+streetrx_morphine %>%filter(streetrx_morphine$state!="")
+
+nrow(streetrx_morphine)
+head(streetrx_morphine)
+```
+```{r}
+#factorize categorical variable: source, form_temp and bulk_purchase
+streetrx_morphine$bulk_fac <- factor(streetrx_morphine$bulk_purchase,levels=c("0 Not bulk purchase","1 Bulk purchase"),labels=c("No","Yes"))
+streetrx_morphine$source_rename <- ifelse(streetrx_morphine$source%in%c("Personal","Heard it","Internet","Internet Pharmacy","Unknown"),as.character(streetrx_morphine$source),"Internet")
+streetrx_morphine$source_fac <- factor(streetrx_morphine$source_rename)
+streetrx_morphine$form_fac <- factor(streetrx_morphine$form_temp)
+levels(streetrx_morphine$form_fac)
+
+```
+```{r}
+## explore the response variable, price per milogram
+summary(streetrx_morphine$ppm)
+ggplot(data=streetrx_morphine,aes(x=streetrx_morphine$ppm))+geom_histogram(bins=50)
+ggplot(data=streetrx_morphine,aes(x=streetrx_morphine$ppm))+geom_boxplot()
+qqnorm(streetrx_morphine$ppm)
+# super skewed, it is not even outliers are changing it
+```
+
+```{r}
+#try some transformation on ppm
+
+#better, add log_ppm, one entry has ppm=0.drop it
+streetrx_morphine <- streetrx_morphine[streetrx_morphine$ppm!=0,]
+streetrx_morphine$logppm<-log(streetrx_morphine$ppm)
+ggplot(data=streetrx_morphine,aes(x=streetrx_morphine$logppm))+geom_histogram(bins=50)
+ggplot(data=streetrx_morphine,aes(x=streetrx_morphine$logppm))+geom_boxplot()
+qqnorm(streetrx_morphine$logppm)
+qqnorm(sqrt(streetrx_morphine$ppm))
+###??? much better, sqrt does not help at all
+```
+
+```{r}
+#by region?
+streetrx_morphine %>% count(USA_region)
+
+ggplot(streetrx_morphine,
+aes(x=USA_region, y=logppm,, fill=USA_region)) +
+geom_boxplot() +
+labs(title="Log ppm by USA_region",
+x="USA region",y="log(ppm)") + theme_classic() +
+theme(legend.position="none",axis.text.x = element_text(angle = 90))
+
+```
+```{r}
+#by state? hierarchical?
+streetrx_morphine %>% count(state)
+median(table(streetrx_morphine['state']))
+table(streetrx_morphine['state']) #ignore count = 0 group,
+# some groups does not have a lot of data
+#varation by state?
+#sample a few, 25?
+```
+```{r}
+#varations among states
+set.seed(1000)
+sample_state <- sample(unique(streetrx_morphine$state),25,replace=F)
+ggplot(streetrx_morphine[is.element(streetrx_morphine$state,sample_state),],
+aes(x=state, y=logppm,, fill=state)) +
+geom_boxplot() +
+labs(title="Log ppm by state",
+x="state",y="log(ppm)") + theme_classic() +
+theme(legend.position="none",axis.text.x = element_text(angle = 90))
+#yes??, but some only have <50
+
+sample_state <- which(table(streetrx_morphine$state)> 54) #since median is 54
+ggplot(streetrx_morphine[is.element(streetrx_morphine$state,names(sample_state)),],
+aes(x=state, y=logppm,, fill=state)) +
+geom_boxplot() +
+labs(title="Log ppm by state with >54 entries",
+x="state",y="log(ppm)") + theme_classic() +
+theme(legend.position="none",axis.text.x = element_text(angle = 90))
+#do we need to do an anova test to see if grouped averages are truely different?
+
+```
+```{r}
+streetrx_morphine %>% count(source_fac)
+```
+```{r}
+#categorical variables:
+#source, bulk purchase, USA region,
+# we have seen that USA region does not matter??
+# source
+ggplot(streetrx_morphine,aes(x=source_fac, y=logppm, fill=source_fac)) +
+geom_boxplot() + scale_fill_brewer(palette="Set1") +
+labs(title="Log(ppm) vs Source", x="source",y="Log(ppm)") +
+theme_classic() + theme(legend.position="none")
+#can't say the difference
+
+# state and source
+sample_state <- sample(unique(streetrx_morphine$state),8,replace=F)
+ggplot(streetrx_morphine[is.element(streetrx_morphine$state,sample_state),],
+aes(x=source_fac, y=logppm, fill=source_fac)) +
+geom_boxplot() +
+scale_fill_brewer(palette="Set1") +
+labs(title="log(ppm) vs source by state",
+x="source",y="log(ppm") +
+theme_classic() + theme(legend.position="none") +
+facet_wrap( ~ state,ncol=4)
+#lets only do it for state with >50
+
+sample_state <- which(table(streetrx_morphine$state)> 54)[1:10] #since median is 54
+ggplot(streetrx_morphine[is.element(streetrx_morphine$state,names(sample_state)),],
+aes(x=source_fac, y=logppm, fill=source_fac)) +
+geom_boxplot() +
+scale_fill_brewer(palette="Set1") +
+labs(title="log(ppm) vs source by state with >50 first 10/28",
+x="source",y="log(ppm") +
+theme_classic() + theme(legend.position="none") +
+facet_wrap( ~ state,ncol=5)
+
+sample_state <- which(table(streetrx_morphine$state)> 54)[11:20] #since median is 54
+ggplot(streetrx_morphine[is.element(streetrx_morphine$state,names(sample_state)),],
+aes(x=source_fac, y=logppm, fill=source_fac)) +
+geom_boxplot() +
+scale_fill_brewer(palette="Set1") +
+labs(title="log(ppm) vs source by state with >50 11-20/28",
+x="source",y="log(ppm") +
+theme_classic() + theme(legend.position="none") +
+facet_wrap( ~ state,ncol=5)
+
+sample_state <- which(table(streetrx_morphine$state)> 54)[21:28] #since median is 54
+ggplot(streetrx_morphine[is.element(streetrx_morphine$state,names(sample_state)),],
+aes(x=source_fac, y=logppm, fill=source_fac)) +
+geom_boxplot() +
+scale_fill_brewer(palette="Set1") +
+labs(title="log(ppm) vs source by state with >50 11-20/28",
+x="source",y="log(ppm") +
+theme_classic() + theme(legend.position="none") +
+facet_wrap( ~ state,ncol=4)
+# slope on source_fac varies with state? yes? we can try comparing AIC values with and without
+```
+
+```{r}
+# state and bulk purchase?
+
+
+#bulk
+ggplot(streetrx_morphine,aes(x=bulk_fac, y=logppm, fill=bulk_fac)) +
+geom_boxplot() + scale_fill_brewer(palette="Greens") +
+labs(title="Log(ppm) vs Bulk purchase", x="bulk purchase?",y="Log(ppm)") +
+theme_classic() + theme(legend.position="none")
+
+sample_state <- sample(unique(streetrx_morphine$state),8,replace=F)
+ggplot(streetrx_morphine[is.element(streetrx_morphine$state,sample_state),],aes(x=bulk_fac, y=logppm, fill=bulk_fac)) +
+geom_boxplot() +
+scale_fill_brewer(palette="Set1") +
+labs(title="log(ppm) vs bulk purchase? by state",
+x="bulk purchase?",y="log(ppm") +
+theme_classic() + theme(legend.position="none") +
+facet_wrap( ~ state,ncol=4)
+#lets only do it for state with >50
+
+sample_state <- which(table(streetrx_morphine$state)> 54)[1:10] #since median is 54
+ggplot(streetrx_morphine[is.element(streetrx_morphine$state,names(sample_state)),],
+aes(x=bulk_fac, y=logppm, fill=bulk_fac)) +
+geom_boxplot() +
+scale_fill_brewer(palette="Set1") +
+labs(title="log(ppm) vs bulk purchase? by state with >50 first 10/28",
+x="bulk purchase?",y="log(ppm") +
+theme_classic() + theme(legend.position="none") +
+facet_wrap( ~ state,ncol=5)
+
+sample_state <- which(table(streetrx_morphine$state)> 54)[11:20] #since median is 54
+ggplot(streetrx_morphine[is.element(streetrx_morphine$state,names(sample_state)),],
+aes(x=bulk_fac, y=logppm, fill=bulk_fac)) +
+geom_boxplot() +
+scale_fill_brewer(palette="Set1") +
+labs(title="log(ppm) vs bulk purchase? by state with >50 11-20/28",
+x="bulk purchase?",y="log(ppm") +
+theme_classic() + theme(legend.position="none") +
+facet_wrap( ~ state,ncol=5)
+
+sample_state <- which(table(streetrx_morphine$state)> 54)[21:28] #since median is 54
+ggplot(streetrx_morphine[is.element(streetrx_morphine$state,names(sample_state)),],
+aes(x=bulk_fac, y=logppm, fill=bulk_fac)) +
+geom_boxplot() +
+scale_fill_brewer(palette="Set1") +
+labs(title="log(ppm) vs bulk purchase? by state with >50 11-20/28",
+x="bulk purchase?",y="log(ppm") +
+theme_classic() + theme(legend.position="none") +
+facet_wrap( ~ state,ncol=4)
+#seems like slope on bulk_fac varies with state?
+```
+
+```{r}
+# state and form
+ggplot(streetrx_morphine,aes(x=form_fac, y=logppm, fill=form_fac)) +
+geom_boxplot() + scale_fill_brewer(palette="Greens") +
+labs(title="Log(ppm) vs form", x="form",y="Log(ppm)") +
+theme_classic() + theme(legend.position="none")
+
+sample_state <- sample(unique(streetrx_morphine$state),8,replace=F)
+ggplot(streetrx_morphine[is.element(streetrx_morphine$state,sample_state),],
+aes(x=form_fac, y=logppm, fill=form_fac)) +
+geom_boxplot() +
+scale_fill_brewer(palette="Set1") +
+labs(title="log(ppm) vs form by state",
+x="source",y="log(ppm") +
+theme_classic() + theme(legend.position="none") +
+facet_wrap( ~ state,ncol=4)
+#lets only do it for state with >50
+
+sample_state <- which(table(streetrx_morphine$state)> 54)[1:10] #since median is 54
+ggplot(streetrx_morphine[is.element(streetrx_morphine$state,names(sample_state)),],
+aes(x=form_fac, y=logppm, fill=form_fac)) +
+geom_boxplot() +
+scale_fill_brewer(palette="Set1") +
+labs(title="log(ppm) vs form by state with >50 first 10/28",
+x="source",y="log(ppm") +
+theme_classic() + theme(legend.position="none") +
+facet_wrap( ~ state,ncol=5)
+
+sample_state <- which(table(streetrx_morphine$state)> 54)[11:20] #since median is 54
+ggplot(streetrx_morphine[is.element(streetrx_morphine$state,names(sample_state)),],
+aes(x=form_fac, y=logppm, fill=form_fac)) +
+geom_boxplot() +
+scale_fill_brewer(palette="Set1") +
+labs(title="log(ppm) vs form by state with >50 11-20/28",
+x="source",y="log(ppm") +
+theme_classic() + theme(legend.position="none") +
+facet_wrap( ~ state,ncol=5)
+
+sample_state <- which(table(streetrx_morphine$state)> 54)[21:28] #since median is 54
+ggplot(streetrx_morphine[is.element(streetrx_morphine$state,names(sample_state)),],
+aes(x=form_fac, y=logppm, fill=form_fac)) +
+geom_boxplot() +
+scale_fill_brewer(palette="Set1") +
+labs(title="log(ppm) vs form by state with >50 11-20/28",
+x="source",y="log(ppm") +
+theme_classic() + theme(legend.position="none") +
+facet_wrap( ~ state,ncol=4)
+#varting slope on form by state? we are not using them
+```
+```{r}
+streetrx_morphine %>% count(form_fac)
+#since only 3 out of XXX, and 
+```
+```{r}
+#numerical: mgstr
+ggplot(streetrx_morphine,aes(x=mgstr,y=logppm))+geom_point()+geom_smooth(method="lm",col="red3")
+# mgstr shoud be included in the final model
+
+sample_state <- which(table(streetrx_morphine$state)> 54)[1:10] #since median is 54
+ggplot(streetrx_morphine[is.element(streetrx_morphine$state,names(sample_state)),],
+aes(x=mgstr, y=logppm, fill=form_fac)) +
+geom_point() +geom_smooth(method="lm",col="red3")+
+scale_fill_brewer(palette="Set1") +
+labs(title="log(ppm) vs mgstr by state with >50 first 10/28",
+x="source",y="log(ppm") +
+theme_classic() + theme(legend.position="none") +
+facet_wrap( ~ state,ncol=5)
+
+sample_state <- which(table(streetrx_morphine$state)> 54)[11:20] #since median is 54
+ggplot(streetrx_morphine[is.element(streetrx_morphine$state,names(sample_state)),],
+       aes(x=mgstr,y=logppm, fill=form_fac))+
+geom_point() +geom_smooth(method="lm",col="red3")+
+scale_fill_brewer(palette="Set1") +
+labs(title="log(ppm) vs mgstr by state with >50 11-20/28",
+x="source",y="log(ppm") +
+theme_classic() + theme(legend.position="none") +
+facet_wrap( ~ state,ncol=5)
+
+sample_state <- which(table(streetrx_morphine$state)> 54)[21:28] #since median is 54
+ggplot(streetrx_morphine[is.element(streetrx_morphine$state,names(sample_state)),],
+aes(x=mgstr, y=logppm, fill=form_fac)) +
+geom_point() +geom_smooth(method="lm",col="red3")+
+scale_fill_brewer(palette="Set1") +
+labs(title="log(ppm) vs mgstr by state with >50 11-20/28",
+x="source",y="log(ppm") +
+theme_classic() + theme(legend.position="none") +
+facet_wrap( ~ state,ncol=4)
+#varying slope on mgstr across state?
+```
+
+
+```{r}
+
+baseline <- lm(logppm~mgstr+source_fac+form_fac+bulk_fac+state,data=streetrx_morphine)
+summary(baseline)
+baseline$coefficients
+plot(baseline)
+plot(baseline,which=4)
+plot(streetrx_morphine$mgstr,baseline$residuals)
+```
+
+
+```{r}
+
+nullModel<- lm(logppm~1,data= streetrx_morphine)
+fullModel <- lm(logppm~mgstr+source_fac+form_fac+bulk_fac+state
+                +mgstr:state+source_fac:state+form_fac:state+bulk_fac:state,data=streetrx_morphine)
+
+stepwise <- step(nullModel,scope = formula(fullModel),direction="both",trace=0)
+stepwise$call
+```
+```{r}
+
+model <- lm(formula = logppm ~ mgstr + state + bulk_fac + source_fac + mgstr:state, data = streetrx_morphine)
+summary(model)
+plot(model)
+plot(model)
+```
+
