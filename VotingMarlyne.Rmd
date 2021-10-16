@@ -1,0 +1,304 @@
+---
+title: "Voting"
+author: "Marlyne Hakizimana"
+date: "10/12/2021"
+output: html_document
+---
+
+
+```{r }
+#https://democracync.org/wp-content/uploads/2017/05/WhoVoted2016.pdf
+#library(stargazer)
+#library(tidyverse)
+library(ggplot2)
+#library(arm)
+library(pROC)
+#library(caret)
+#library(e1071)
+#library(GGally)
+#library("rms")
+#library(plyr)
+#install.packages("tidyverse")
+#install.packages('tidytext')
+library(tidyverse)
+library(tidytext)
+#install.packages('tm')
+library(tm)
+library(gmodels)
+library(crosstable)
+library(lme4)
+library(merTools)
+library(rstan)
+library(sjPlot) #another option for making nice html tables
+library(lattice) #for ranef
+library(glmmTMB)
+```
+```{r include=FALSE}
+voting <- read.delim("history_stats_20201103.txt",sep = '\t',header=TRUE)
+votingdata<-data.frame(voting)
+
+```
+```{r include=FALSE}
+registered <- read.delim("voter_stats_20201103.txt",sep = '\t',header=TRUE)
+registereddata<-data.frame(registered)
+```
+```{r include=FALSE}
+set.seed(321)
+#set.seed(123)
+fc<-sample(unique(registereddata$county_desc),size=25)
+votingdata25<-filter(votingdata,county_desc %in%fc)
+registered25<-filter(registereddata,county_desc %in%fc)
+```
+```{r include=FALSE}
+agg_registered<-aggregate(registered25$total_voters,
+                             list(age=registered25$age,party_cd=registered25$party_cd,county_desc=registered25$county_desc,race_code=registered25$race_code,ethnic_code=registered25$ethnic_code,sex_code=registered25$sex_code),sum)
+
+```
+```{r include=FALSE}
+agg_voters <- aggregate(votingdata25$total_voters,
+                             list(age=votingdata25$age,party_cd=votingdata25$voted_party_cd,county_desc=votingdata25$county_desc,race_code=votingdata25$race_code,ethnic_code=votingdata25$ethnic_code,sex_code=votingdata25$sex_code),sum)
+
+
+```
+```{r include=FALSE}
+agg_voters$voters_total<-agg_voters$x
+agg_registered$reg_total<-agg_registered$x
+agg_voters<-agg_voters[,-7]
+agg_registered<-agg_registered[,-7]
+mergedata<-agg_registered%>%left_join(agg_voters,by=c('county_desc','age','party_cd','race_code','ethnic_code','sex_code'))
+
+
+
+```
+
+```{r include=FALSE}
+#since we sometimes have more voters than registered ones, this is probably due to the fact some people might have moved and voted somewhere else. we decided to bring down the number of voters to the same level of registers and have a 100% turnout rate instead of over 100%
+mergedata$voters_total[is.na(mergedata$voters_total)] <- 0
+
+```
+```{r include=FALSE}
+mergedata$voters_total[mergedata$voters_total>mergedata$reg_total] <- mergedata$reg_total[mergedata$voters_total>mergedata$reg_total]
+mergedata$turnout_rate<- mergedata$voters_total/mergedata$reg_total
+
+```
+
+```{r include=FALSE}
+mergedata$age<-as.factor(mergedata$age)
+mergedata$party_cd<-as.factor(mergedata$party_cd)
+mergedata$county_desc<-as.factor(mergedata$county_desc)
+mergedata$race_code<-as.factor(mergedata$race_code)
+mergedata$ethnic_code<-as.factor(mergedata$ethnic_code)
+mergedata$sex_code<-as.factor(mergedata$sex_code)
+```
+
+####EDA###
+```{r }
+CrossTable(mergedata$party_cd,prop.c=F,prop.chisq=F,format="SPSS",max.width=10)
+```
+
+```{r }
+crosstable(mergedata, party_cd, by= sex_code)%>%as_flextable(keep_id=TRUE)
+```
+```{r }
+crosstable(mergedata,sex_code,by= party_cd)%>%as_flextable(keep_id=TRUE)
+```
+```{r }
+#we have only one data on race code '' and party "REP"
+crosstable(mergedata,age,race_code,sex_code,by= party_cd,total='both')%>%as_flextable(keep_id=TRUE)
+```
+```{r }
+crosstable(mergedata,age,party_cd,sex_code,by= ethnic_code)%>%as_flextable(keep_id=TRUE)
+
+```
+```{r }
+#crosstable(mergedata,age,sex_code,by= ethnic_code)%>%as_flextable(keep_id=TRUE)
+crosstable(mergedata,age,sex_code,by= ethnic_code,total='both')%>%as_flextable(keep_id=TRUE)
+```
+```{r }
+#crosstable(mergedata,age,sex_code,by= ethnic_code)%>%as_flextable(keep_id=TRUE)
+crosstable(mergedata[table(mergedata$precinct_abbrv)>100,],precinct_abbrv,by= party_cd)%>%as_flextable(keep_id=TRUE)
+```
+
+## Demographic group: sex 
+```{r }
+#From here we can see that across counties, average turnout rate for females is mostly higher than for males but some counties have a higher different 
+#undesignated people are way  higher across states. cooolll
+new<-mergedata%>%group_by(county_desc,sex_code)%>% summarise(
+  turn = mean(turnout_rate))
+
+ggplot(data = new) + 
+    geom_boxplot(aes(x=county_desc, y=turn, color = sex_code))
+```
+
+## Demographic group:party_cd across states
+```{r }
+#It is interesting to see that across countries, republican's have a higher turnput rate in general, followed by democrats and liberteriants and unafillianted
+
+# howver as you can see we have some outliers less than 0.2% turnout
+new<-mergedata%>%group_by(county_desc,party_cd)%>% summarise(
+  turn = mean(turnout_rate))
+
+ggplot(data = new) + 
+    geom_boxplot(aes(x=county_desc, y=turn, color = party_cd))
+```
+## Demographic group:ethnic across counties
+clearly there is a huge disctinction. which shows shows how hispanic had a lowe turnout rate overall all in counties. but there is variation between HL and UN. so we could try to do a random slope on this 
+
+```{r }
+
+new<-mergedata%>%group_by(county_desc,ethnic_code)%>% summarise(
+  turn = mean(turnout_rate))
+
+ggplot(data = new) + 
+    geom_boxplot(aes(x=county_desc, y=turn, color = ethnic_code))
+```
+## Demographic group:race across counties
+P is an outlier. we should thinkn of removing it. it's all the blue points.
+white and undesignated races are consistently high
+black is the overall low one.
+```{r }
+
+new<-mergedata%>%group_by(county_desc,race_code)%>% summarise(
+  turn = mean(turnout_rate))
+
+ggplot(data = new) + 
+    geom_boxplot(aes(x=county_desc, y=turn, color = race_code))
+```
+
+
+
+
+### Demographic group sex_code across parties
+
+Across parties, undesignated are high(like really high). there is some variation for female vs males across partie. but mostly it looks like females are higher most times except for GRE and CST??
+
+AGAIN we see higher turnout in all gender for republicans!!!
+```{r }
+ 
+
+new<-mergedata%>%group_by(party_cd,sex_code)%>% summarise(
+  turn = mean(turnout_rate))
+
+ggplot(data = new) + 
+    geom_boxplot(aes(x=party_cd, y=turn, color = sex_code))
+
+
+
+```
+### Demographic group race vs sex and  across parties
+LIMITATIONS: undesignated and other might play a big role.
+Across race, 
+female dominate more than males and in some races that difference is not that significant.
+If we look this difference across parties, we still see that females dominate but the black male democrats are the lowest of all other democrats races. the variation is in the other parties
+
+```{r }
+ 
+
+new<-mergedata%>%group_by(race_code,sex_code)%>% summarise(
+  turn = mean(turnout_rate))
+
+ggplot(data = new) + 
+    geom_boxplot(aes(x=race_code, y=turn, color = sex_code))
+
+#for across parties
+new1<-mergedata%>%group_by(race_code,party_cd,sex_code)%>% summarise(
+  turn = mean(turnout_rate))
+
+ggplot(data = new1) + 
+    geom_boxplot(aes(x=race_code, y=turn, color = sex_code))+facet_wrap(~party_cd)
+
+```
+### Demographic group age vs sex and  across parties
+
+ALSO 
+Across age, republicans win over democrats.
+Overall, within party, more older people  had higher turnout.
+across ages, turnout changes depending on parties. Within party DEM and republica, females dominate by a little bit from males. as they age the difference beteween males and females decrease.
+```{r }
+ 
+
+new<-mergedata%>%group_by(age,party_cd)%>% summarise(
+  turn = mean(turnout_rate))
+
+ggplot(data = new) + 
+    geom_boxplot(aes(x=age, y=turn, color = party_cd))
+
+#for across parties
+new1<-mergedata%>%group_by(age,party_cd,sex_code)%>% summarise(
+  turn = mean(turnout_rate))
+
+ggplot(data = new1) + 
+    geom_boxplot(aes(x=age, y=turn, color = sex_code))+facet_wrap(~party_cd)
+
+```
+```{r }
+#turnout rate within parties is overall similar for males and females but across, but the rates change across parties.
+#crosstable(mergedata,age,ethnic_code,sex_code,by= party_cd)%>%as_flextable(keep_id=TRUE)
+ggplot(mergedata,aes(sex_code,turnout_rate))+geom_boxplot()+facet_wrap(~party_cd)
+
+#ggplot(data = mergedata) + 
+#    geom_boxplot(aes(x=sex_code, y=turnout_rate, color = party_cd))
+```
+```{r }
+#Even if the levels for ages within party have a similar trend(the youngers are almost at the lowest level ) the levels change ??/
+#crosstable(mergedata,age,ethnic_code,sex_code,by= party_cd)%>%as_flextable(keep_id=TRUE)
+ggplot(mergedata,aes(age,turnout_rate))+geom_boxplot()+facet_wrap(~party_cd)
+
+#ggplot(data = mergedata) + 
+#    geom_boxplot(aes(x=sex_code, y=turnout_rate, color = party_cd))
+```
+```{r }
+#crosstable(mergedata,age,ethnic_code,sex_code,by= party_cd)%>%as_flextable(keep_id=TRUE)
+ggplot(mergedata,aes(race_code,turnout_rate,color=sex_code))+geom_boxplot()
+
+```
+
+##Model
+```{r }
+modebas<-glm(cbind(voters_total,reg_total)~age+party_cd+county_desc,data=mergedata,family=binomial)
+summary(modebas)
+```
+
+# making sex_code randomslope is not as good
+
+```{r }
+modebas<-glmer(cbind(voters_total,reg_total-voters_total) ~sex_code+age:ethnic_code+(1|party_cd:race_code)+(1|county_desc),family=binomial(link="logit"),data=mergedata)
+
+modebas1<-glmer(cbind(voters_total,reg_total-voters_total) ~age+sex_code+ethnic_code+(1|party_cd:race_code)+(1|county_desc),family=binomial(link="logit"),data=mergedata)
+
+AIC(modebas1,modebas)
+```
+```{r }
+modebas<-glmer(cbind(voters_total,reg_total-voters_total) ~age+sex_code+ethnic_code+party_cd+race_code+(1|county_desc),family=binomial(link="logit"),data=mergedata)
+
+#modebas<-glmer(cbind(voters_total,reg_total-voters_total) #~age*sex_code*ethnic_code+(1|party_cd:race_code)+(1|county_desc),family=binomial(link="logit"),da#ta=mergedata)
+#[sample(nrow(mergedata), 13000), ]
+summary(modebas)
+```
+```{r }
+
+#add age as random slope
+
+#modebas<-glmer(cbind(voters_total,reg_total-voters_total) #~age+sex_code+ethnic_code+(1|party_cd:race_code)+(1|county_desc),family=binomial(link="logit"),dat#a=mergedata)
+
+modebas<-glmer(cbind(voters_total,reg_total-voters_total) ~age+party_cd+race_code+sex_code+ethnic_code+(1|age)+(1|county_desc),family=binomial(link="logit"),data=mergedata)
+#(1|party_cd:race_code)
+#[sample(nrow(mergedata), 13000), ]
+summary(modebas)
+```
+If we only have the random interecept for county, we are saying that all predictors have the same impact on all groups but the overall interecept of the turnout rate is different in each group.
+
+On the other hnd if we thing that they all have the same starting interecpt but age acts differently on different groups, we would only vary the slope. 
+```{r }
+#visualize results: plot estimated OR's with 2 SD error bars ea. side
+plot_model(modebas,show.values = TRUE)
+plot_model(modebas,type="pred")
+p <- plot_model(modebas,type="re",show.values = TRUE,ri.nr = c(1,2))
+p[[1]]
+p[[2]]
+```
+```{r }
+library(gridExtra)
+grid.arrange(p[[1]],p[[2]])
+```
+###
