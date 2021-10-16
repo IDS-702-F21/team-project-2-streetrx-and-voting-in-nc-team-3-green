@@ -1,0 +1,344 @@
+---
+title: "Voting"
+author: "Marlyne Hakizimana"
+date: "10/12/2021"
+updated: "10/14/2021 - Tigran"
+output: html_document
+---
+
+
+```{r }
+#library(stargazer)
+#library(tidyverse)
+library(ggplot2)
+#library(arm)
+library(pROC)
+#library(caret)
+#library(e1071)
+#library(GGally)
+#library("rms")
+#library(plyr)
+#install.packages("tidyverse")
+#install.packages('tidytext')
+library(tidyverse)
+library(tidytext)
+#install.packages('tm')
+library(tm)
+```
+
+```{r include=FALSE}
+voting <- read.delim("C:\\Users\\harut\\OneDrive\\Documents\\00_IDS_702_modelling and representation of data\\history_stats_20201103.txt",sep = '\t',header=TRUE)
+votingdata<-data.frame(voting)
+
+```
+
+```{r include=FALSE}
+registered <- read.delim("C:\\Users\\harut\\OneDrive\\Documents\\00_IDS_702_modelling and representation of data\\voter_stats_20201103.txt",sep = '\t',header=TRUE)
+registereddata<-data.frame(registered)
+```
+
+```{r include=FALSE}
+set.seed(321)
+fc<-sample(unique(registereddata$county_desc),size=25)
+votingdata25<-filter(votingdata,county_desc %in%fc)
+registered25<-filter(registereddata,county_desc %in%fc)
+```
+
+```{r include=FALSE}
+agg_voted25 <- aggregate(votingdata25$total_voters,
+                             list(age=votingdata25$age,
+                                  party_cd=votingdata25$voted_party_cd,
+                                  county_desc=votingdata25$county_desc,
+                                  #precinct_abbrv=votingdata25$precinct_abbrv,
+                                  race_code=votingdata25$race_code,
+                                  ethnic_code=votingdata25$ethnic_code,
+                                  sex_code=votingdata25$sex_code),sum)
+
+agg_voted25 <- agg_voted25%>%
+  rename(total_voted = x)
+
+agg_registered25 <- aggregate(registered25$total_voters,
+                             list(age=registered25$age,
+                                  party_cd=registered25$party_cd,
+                                  county_desc=registered25$county_desc,
+                                  #precinct_abbrv=registered25$precinct_abbrv,
+                                  race_code=registered25$race_code,
+                                  ethnic_code=registered25$ethnic_code,
+                                  sex_code=registered25$sex_code),sum)
+
+agg_registered25 <- agg_registered25%>%
+  rename(total_reg = x)
+
+
+#drop <- c("update_date","election_date", "stats_type")
+#registered25_reduced <- registered25[,!(names(registered25) %in% drop)]
+
+```
+
+```{r include=FALSE}
+mergedata<-left_join( agg_registered25,agg_voted25, by = c('county_desc'='county_desc', 
+                                                           #'precinct_abbrv'='precinct_abbrv',
+                                                           'party_cd'='party_cd',
+                                                           'race_code'='race_code',
+                                                           'ethnic_code'='ethnic_code',
+                                                           'sex_code'='sex_code',
+                                                           'age'='age'))
+
+
+```
+
+```{r}
+mergedata$total_voted[is.na(mergedata$total_voted)] <- 0
+
+mergedata$voters_total[mergedata$voters_total>mergedata$reg_total] <- mergedata$reg_total[mergedata$voters_total>mergedata$reg_total]
+```
+
+
+```{r}
+# 77 records with N/A
+mergedata <- na.omit(mergedata)
+
+#22 Records with higer voters than registered
+data <- data.frame(mergedata[mergedata$total_voted <= mergedata$total_reg,])
+
+data$county_desc <- as.factor(data$county_desc)
+
+```
+
+
+```{r}
+data$turnout <- round(data$total_voted/data$total_reg,digits = 2)
+```
+
+
+```{r}
+ggplot(data, aes(turnout)) + 
+  geom_histogram(binwidth = 0.03)
+
+```
+
+
+```{r}
+ggplot(data,
+       aes(x=county_desc, y=turnout, fill=county_desc)) +
+geom_boxplot() +
+  labs(title="turnout levels by county",
+       x="County",y="turnout") + theme_classic()+ 
+theme(legend.position="none",axis.text.x = element_text(angle = 90))
+```
+
+
+```{r}
+
+data$sex_code[data$sex_code == "F"] <- "FEMALE"
+data$sex_code[data$sex_code == "M"] <- "MALE"
+data$sex_code[data$sex_code == "U"] <- "SEX UNK"
+data$sex_code <- as.factor(data$sex_code)
+
+
+dmgr_sex <- aggregate(list(voted = data$total_voted, registered=data$total_reg), by = list(dmgr = data$sex_code),sum)
+
+dmgr <- dmgr_sex
+
+
+
+```
+
+
+```{r}
+# First, let's look at Vote vs Sex
+ggplot(data,aes(x=sex_code, y=turnout, fill=sex_code)) +
+  geom_boxplot() + coord_flip() +
+  scale_fill_brewer(palette="Reds") +
+  labs(title="Turnout vs sex",
+       x="Sex",y="Turnout") + 
+  theme_classic() + theme(legend.position="none")
+```
+
+```{r}
+dmgr_age <- aggregate(list(voted = data$total_voted, registered=data$total_reg), by = list(dmgr = data$age),sum)
+dmgr_age <- as.factor(dmgr_age)
+  
+dmgr <- rbind(dmgr, dmgr_age)
+```
+
+```{r}
+# Let's look at Turnout vs Age
+ggplot(data,aes(x=age, y=turnout, fill=age)) +
+  geom_boxplot() + coord_flip() +
+  scale_fill_brewer(palette="Reds") +
+  labs(title="Total Turnout vs age",
+       x="Age",y="Turnout") + 
+  theme_classic() + theme(legend.position="none")
+```
+
+```{r}
+data$race_code[data$race_code == "A"] <- "ASIAN"
+data$race_code[data$race_code == "B"] <- "BLACK or AFRICAN AMERICAN"
+data$race_code[data$race_code == "I"] <- "INDIAN AMERICAN or ALASKA NATIVE"
+data$race_code[data$race_code == "M"] <- "TWO or MORE RACES"
+data$race_code[data$race_code == "O" | data$race_code == "P"] <- "RACE OTHER"
+data$race_code[data$race_code == "U"] <- "RACE UNDESIGNATED"
+data$race_code[data$race_code == "W"] <- "WHITE"
+data$race_code <- as.factor(data$race_code)
+
+
+dmgr_race <- aggregate(list(voted = data$total_voted, registered=data$total_reg), by = list(dmgr = data$race_code),sum)
+  
+dmgr <- rbind(dmgr, dmgr_race)
+```
+
+
+```{r}
+# Let's look at Turnout vs Race
+ggplot(data,aes(x=race_code, y=turnout, fill=race_code)) +
+  geom_boxplot() + coord_flip() +
+  scale_fill_brewer(palette="Reds") +
+  labs(title="Total Turnout vs Race",
+       x="Race",y="Turnout") + 
+  theme_classic() + theme(legend.position="none")
+```
+
+```{r}
+data$ethnic_code[data$ethnic_code == "HL"] <- "HISPANIC or LATINO"
+data$ethnic_code[data$ethnic_code == "NL"] <- "NOT HISPANIC or NOT LATINO"
+data$ethnic_code[data$ethnic_code == "UN"] <- "ETHNIC UNDESIGNATED"
+
+data$ethnic_code <- as.factor(data$ethnic_code)
+
+dmgr_ethnic <- aggregate(list(voted = data$total_voted, registered=data$total_reg), by = list(dmgr = data$ethnic_code),sum)
+  
+dmgr <- rbind(dmgr, dmgr_ethnic)
+```
+
+```{r}
+# Let's look at Turnout vs ethnic
+ggplot(data,aes(x=ethnic_code, y=turnout, fill=ethnic_code)) +
+  geom_boxplot() + coord_flip() +
+  scale_fill_brewer(palette="Reds") +
+  labs(title="Total Turnout vs ethnic",
+       x="ethnic",y="Turnout") + 
+  theme_classic() + theme(legend.position="none")
+```
+
+
+```{r}
+data$party_cd[data$party_cd == "DEM"] <- "DEMOCRATIC"
+data$party_cd[data$party_cd == "LIB"] <- "LIBERTARIAN"
+data$party_cd[data$party_cd == "REP"] <- "REPUBLICAN"
+data$party_cd[data$party_cd == "UNA" | data$party_cd =='GRE' | data$party_cd =='CST'] <- "UNAFFILIATED"
+
+data$party_cd <- as.factor(data$party_cd)
+dmgr_party <- aggregate(list(voted = data$total_voted, registered=data$total_reg), by = list(dmgr = data$party_cd),sum)
+  
+dmgr <- rbind(dmgr, dmgr_party)
+
+```
+
+```{r}
+# Let's look at Turnout vs Party
+ggplot(data,aes(x=party_cd, y=turnout, fill=party_cd)) +
+  geom_boxplot() + coord_flip() +
+  scale_fill_brewer(palette="Reds") +
+  labs(title="Turnout vs party",
+       x="party",y="Turnout") + 
+  theme_classic() + theme(legend.position="none")
+```
+```
+```{r}
+# Let's look at Turnout vs Party and Ethnic
+ggplot(data,aes(x=party_cd, y=turnout, fill=party_cd)) +
+  geom_boxplot() + #coord_flip() +
+  scale_fill_brewer(palette="Reds") +
+  labs(title="Turnout vs party and Ethnic",
+       x="party",y="Turnout") + 
+  theme_classic() + theme(legend.position="none") + 
+  facet_wrap( ~ ethnic_code)
+# Let's look at Turnout vs Party and Sex  
+ggplot(data,aes(x=party_cd, y=turnout, fill=party_cd)) +
+  geom_boxplot() + #coord_flip() +
+  scale_fill_brewer(palette="Reds") +
+  labs(title="Turnout vs party and sex",
+       x="party",y="Turnout") + 
+  theme_classic() + theme(legend.position="none") + 
+  facet_wrap( ~ sex_code)
+# Let's look at Turnout vs Party and Age   
+ggplot(data,aes(x=party_cd, y=turnout, fill=party_cd)) +
+  geom_boxplot() + #coord_flip() +
+  scale_fill_brewer(palette="Reds") +
+  labs(title="Turnout vs party and sex",
+       x="party",y="Turnout") + 
+  theme_classic() + theme(legend.position="none") + 
+  facet_wrap( ~ age)
+  
+  
+  
+
+
+# Let's look at Turnout vs race vs age
+ggplot(data,aes(x=race_code, y=turnout, fill=race_code)) +
+  geom_boxplot() + #coord_flip() +
+  scale_fill_brewer(palette="Reds") +
+  labs(title="Total Turnout vs race by age",
+       x="ethnic",y="Turnout") + 
+  theme_classic() + theme(legend.position="none")+
+  facet_wrap( ~ age)
+  
+# Let's look at Turnout vs Age
+ggplot(data,aes(x=age, y=turnout, fill=age)) +
+  geom_boxplot() + coord_flip() +
+  scale_fill_brewer(palette="Reds") +
+  labs(title="Total Turnout vs age",
+       x="Age",y="Turnout") + 
+  theme_classic() + theme(legend.position="none")
+  
+  
+# First, let's look at Vote vs Sex
+ggplot(data,aes(x=sex_code, y=turnout, fill=sex_code)) +
+  geom_boxplot() + coord_flip() +
+  scale_fill_brewer(palette="Reds") +
+  labs(title="Turnout vs sex",
+       x="Sex",y="Turnout") + 
+  theme_classic() + theme(legend.position="none")
+  
+```
+
+
+```{r}
+dmgr_party_sex <- aggregate(list(voted = mergedata$total_vote_r, registered=mergedata$total_voters), by = list(dmgr_1 = mergedata$party_cd, dmgr_2= mergedata$sex_code),sum)
+
+dmgr_party_sex$dmgr <- str_c(dmgr_party_sex$dmgr_1, '-',dmgr_party_sex$dmgr_2)
+
+drop <- c("dmgr_1","dmgr_2")
+dmgr_party_sex <- dmgr_party_sex[,!(names(dmgr_party_sex) %in% drop)]
+
+
+
+dmgr <- rbind(dmgr, dmgr_party_sex)
+```
+
+```{r}
+dmgr_race_sex <- aggregate(list(voted = mergedata$total_vote_r, registered=mergedata$total_voters), by = list(dmgr_1 = mergedata$race_code, dmgr_2= mergedata$sex_code),sum)
+
+dmgr_race_sex$dmgr <- str_c(dmgr_race_sex$dmgr_1, '-',dmgr_race_sex$dmgr_2)
+
+drop <- c("dmgr_1","dmgr_2")
+dmgr_race_sex <- dmgr_race_sex[,!(names(dmgr_race_sex) %in% drop)]
+
+
+
+dmgr <- rbind(dmgr, dmgr_race_sex)
+```
+
+```{r}
+dmgr$turnout <- scales::percent(round(dmgr$voted/dmgr$registered,digits = 2))
+```
+
+```{r}
+ggplot(dmgr, aes(dmgr, turnout)) + 
+  coord_flip() +
+  geom_col()
+#x, y, alpha, color, fill, group, linetype, size
+```
+
+
