@@ -8,6 +8,10 @@ output: html_document
 ```{r}
 library(ggplot2)
 library(dplyr)
+library(lme4)
+library(stargazer)
+library(lattice)
+library(caret)
 ```
 
 ```{r}
@@ -20,13 +24,16 @@ streetrx_morphine<-na.omit(streetrx_morphine)
 streetrx_morphine <- streetrx_morphine[,! colnames(streetrx_morphine) %in% c("yq_pdate","price_date","city","country","Primary_Reason")] #drop columns
 #drop entry row with = ""
 streetrx_morphine$source <- ifelse(streetrx_morphine$source=="", "Unknown",as.character(streetrx_morphine$source))
-
-streetrx_morphine %>%filter(streetrx_morphine$state!="")
+#rename state = USA to unkown
+streetrx_morphine$state <- ifelse(streetrx_morphine$state=="USA","Unknown",as.character(streetrx_morphine$state))
+streetrx_morphine<-streetrx_morphine %>%filter(streetrx_morphine$state!="")
 
 nrow(streetrx_morphine)
 head(streetrx_morphine)
 ```
 ```{r}
+streetrx_morphine$logppm<-log(streetrx_morphine$ppm) # add a log column
+streetrx_morphine$mgstr_c <- scale(streetrx_morphine$mgstr) #center mgstr
 #factorize categorical variable: source, form_temp and bulk_purchase
 streetrx_morphine$bulk_fac <- factor(streetrx_morphine$bulk_purchase,levels=c("0 Not bulk purchase","1 Bulk purchase"),labels=c("No","Yes"))
 streetrx_morphine$source_rename <- ifelse(streetrx_morphine$source%in%c("Personal","Heard it","Internet","Internet Pharmacy","Unknown"),as.character(streetrx_morphine$source),"Internet")
@@ -49,7 +56,6 @@ qqnorm(streetrx_morphine$ppm)
 
 #better, add log_ppm, one entry has ppm=0.drop it
 streetrx_morphine <- streetrx_morphine[streetrx_morphine$ppm!=0,]
-streetrx_morphine$logppm<-log(streetrx_morphine$ppm)
 ggplot(data=streetrx_morphine,aes(x=streetrx_morphine$logppm))+geom_histogram(bins=50)
 ggplot(data=streetrx_morphine,aes(x=streetrx_morphine$logppm))+geom_boxplot()
 qqnorm(streetrx_morphine$logppm)
@@ -160,7 +166,7 @@ facet_wrap( ~ state,ncol=4)
 
 ```{r}
 # state and bulk purchase?
-
+streetrx_morphine %>% count(bulk_fac)
 
 #bulk
 ggplot(streetrx_morphine,aes(x=bulk_fac, y=logppm, fill=bulk_fac)) +
@@ -300,10 +306,35 @@ facet_wrap( ~ state,ncol=4)
 #varying slope on mgstr across state?
 ```
 
+```{r}
+#interaction between variables:
+ggplot(streetrx_morphine,
+aes(x=mgstr, y=logppm, fill=bulk_fac)) +
+geom_point() +geom_smooth(method="lm",col="red3")+
+scale_fill_brewer(palette="Set1") +
+labs(title="log(ppm) vs mgstr by bulk_fac",
+x="source",y="log(ppm") +
+theme_classic() + theme(legend.position="none") +
+facet_wrap( ~ bulk_fac,ncol=2)
 
+ggplot(streetrx_morphine,
+aes(x=mgstr, y=logppm, fill=source_fac)) +
+geom_point() +geom_smooth(method="lm",col="red3")+
+scale_fill_brewer(palette="Set1") +
+labs(title="log(ppm) vs mgstr by source_fac",
+x="source",y="log(ppm") +
+theme_classic() + theme(legend.position="none") +
+facet_wrap( ~ source_fac,ncol=5)
+
+ggplot(streetrx_morphine,aes(x=bulk_fac, y=logppm, fill=form_fac)) +
+geom_boxplot() + scale_fill_brewer(palette="Greens") +
+labs(title="Log(ppm) vs bulk by source_fac", x="form",y="Log(ppm)") +
+theme_classic() + theme(legend.position="none")+
+  facet_wrap(~source_fac)
+```
 ```{r}
 
-baseline <- lm(logppm~mgstr+source_fac+form_fac+bulk_fac+state,data=streetrx_morphine)
+baseline <- lm(logppm~mgstr_c+source_fac+form_fac+bulk_fac,data=streetrx_morphine)
 summary(baseline)
 baseline$coefficients
 plot(baseline)
@@ -313,19 +344,63 @@ plot(streetrx_morphine$mgstr,baseline$residuals)
 
 
 ```{r}
-
 nullModel<- lm(logppm~1,data= streetrx_morphine)
-fullModel <- lm(logppm~mgstr+source_fac+form_fac+bulk_fac+state
-                +mgstr:state+source_fac:state+form_fac:state+bulk_fac:state,data=streetrx_morphine)
+fullModel <- lm(logppm~mgstr+source_fac+form_fac+bulk_fac+mgstr_c:source_fac+mgstr_c:bulk_fac+source_fac:bulk_fac,data=streetrx_morphine)
 
 stepwise <- step(nullModel,scope = formula(fullModel),direction="both",trace=0)
 stepwise$call
 ```
 ```{r}
+# model suggested, no form_fac and no interaction term
+model1 <- lm(formula = logppm ~ mgstr_c + bulk_fac + source_fac, data = streetrx_morphine)
+summary(model1)
+plot(model1)
+plot(model1,which=4)
+#check no need to check VIC since only one is numerical
 
-model <- lm(formula = logppm ~ mgstr + state + bulk_fac + source_fac + mgstr:state, data = streetrx_morphine)
-summary(model)
-plot(model)
-plot(model)
+```
+```{r}
+# try hierarchical with state
+hier_model1 <- lmer(logppm~mgstr_c+bulk_fac+source_fac+(1|state),data=streetrx_morphine)
+summary(hier_model1)
+
+
+hier_model2 <- lmer(logppm~mgstr_c+bulk_fac+source_fac+(1|state/USA_region),data=streetrx_morphine)
+summary(hier_model2)
+
+AIC(hier_model1)
+AIC(hier_model2) #not better, not by region
+
+```
+```{r}
+hier_model3 <- lmer(logppm~mgstr_c+bulk_fac+source_fac+(mgstr_c|state),data=streetrx_morphine)
+summary(hier_model3)
+anova(hier_model1,hier_model3) 
+AIC(hier_model1)
+AIC(hier_model3)
+# AIC much smaller, p<0.05 yes!! varying slope on mgstr_c
 ```
 
+```{r}
+plot(hier_model3)
+plot(streetrx_morphine$mgstr_c,residuals(hier_model3))
+```
+```{r}
+hier_model4 <- lmer(logppm~mgstr_c+bulk_fac+source_fac+(mgstr_c+bulk_fac|state),data=streetrx_morphine)
+summary(hier_model4)
+AIC(hier_model4)
+anova(hier_model3,hier_model4) 
+
+## the warning means the model is overfitted
+```
+
+```{r}
+hier_model5 <- lmer(logppm~mgstr_c+bulk_fac+source_fac+(mgstr_c+source_fac|state),data=streetrx_morphine)
+summary(hier_model5)
+AIC(hier_model5)
+anova(hier_model3,hier_model5) 
+```
+
+```{r}
+dotplot(ranef(hier_model3,condVar=TRUE))$state
+```
