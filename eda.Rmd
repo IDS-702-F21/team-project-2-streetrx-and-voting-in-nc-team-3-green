@@ -12,6 +12,7 @@ library(lme4)
 library(stargazer)
 library(lattice)
 library(caret)
+library(influence.ME)
 ```
 
 ```{r}
@@ -59,7 +60,6 @@ streetrx_morphine <- streetrx_morphine[streetrx_morphine$ppm!=0,]
 ggplot(data=streetrx_morphine,aes(x=streetrx_morphine$logppm))+geom_histogram(bins=50)
 ggplot(data=streetrx_morphine,aes(x=streetrx_morphine$logppm))+geom_boxplot()
 qqnorm(streetrx_morphine$logppm)
-qqnorm(sqrt(streetrx_morphine$ppm))
 ###??? much better, sqrt does not help at all
 ```
 
@@ -172,6 +172,11 @@ streetrx_morphine %>% count(bulk_fac)
 ggplot(streetrx_morphine,aes(x=bulk_fac, y=logppm, fill=bulk_fac)) +
 geom_boxplot() + scale_fill_brewer(palette="Greens") +
 labs(title="Log(ppm) vs Bulk purchase", x="bulk purchase?",y="Log(ppm)") +
+theme_classic() + theme(legend.position="none")
+
+ggplot(streetrx_morphine,aes(x=bulk_fac, y=ppm, fill=bulk_fac)) +
+geom_boxplot() + scale_fill_brewer(palette="Greens") +
+labs(title="ppm vs Bulk purchase", x="bulk purchase?",y="ppm") +
 theme_classic() + theme(legend.position="none")
 
 sample_state <- sample(unique(streetrx_morphine$state),8,replace=F)
@@ -339,37 +344,75 @@ summary(baseline)
 baseline$coefficients
 plot(baseline)
 plot(baseline,which=4)
-plot(streetrx_morphine$mgstr,baseline$residuals)
+plot(streetrx_morphine$mgstr_c,baseline$residuals)
+# checking linearity? The distribution of residuals does not appear to have a trend. Linearity: checked 
 ```
 
 
 ```{r}
 nullModel<- lm(logppm~1,data= streetrx_morphine)
-fullModel <- lm(logppm~mgstr+source_fac+form_fac+bulk_fac+mgstr_c:source_fac+mgstr_c:bulk_fac+source_fac:bulk_fac,data=streetrx_morphine)
+fullModel <- lm(logppm~mgstr_c+source_fac+form_fac+bulk_fac+mgstr_c:source_fac+mgstr_c:bulk_fac+source_fac:bulk_fac,data=streetrx_morphine)
 
 stepwise <- step(nullModel,scope = formula(fullModel),direction="both",trace=0)
 stepwise$call
 ```
+```{r}
+# our EDA suggests bulk_fac might not be a significant factor, let's to a Anova F test to confirm if bulk_fac is really needed
+model1 <- lm(formula = logppm ~ mgstr_c + bulk_fac + source_fac, data = streetrx_morphine)
+model2 <- lm(formula = logppm ~ mgstr_c +  source_fac, data = streetrx_morphine)
+anova(model1,model2)#anova F test
+
+# check if sourc_fac is really significant
+model3 <- lm(formula = logppm ~ mgstr_c +  bulk_fac, data = streetrx_morphine)
+anova(model1,model3)
+
+
+```
+
 ```{r}
 # model suggested, no form_fac and no interaction term
 model1 <- lm(formula = logppm ~ mgstr_c + bulk_fac + source_fac, data = streetrx_morphine)
 summary(model1)
 plot(model1)
 plot(model1,which=4)
+plot(model1,which=5)
 #check no need to check VIC since only one is numerical
 
 ```
+#interesting cluster: fitted values<-2.0
+
+
+```{r}
+streetrx_morphine$logppm_pred <- predict(model1)
+a<-streetrx_morphine%>%filter(logppm_pred< -2.0)
+# ggplot(a,aes(x=state))+geom_bar()+coord_flip()+labs(title="Predicted log(ppm) < -0.2")
+b<-streetrx_morphine%>%filter(logppm_pred>= -2.0)
+hist(a$mgstr_c)
+hist(b$mgstr_c)
+
+
+# ggplot(b,aes(x=state))+geom_bar()+coord_flip()+labs(title="Predicted log(ppm) >= -0.2")
+
+```
+
 ```{r}
 # try hierarchical with state
 hier_model1 <- lmer(logppm~mgstr_c+bulk_fac+source_fac+(1|state),data=streetrx_morphine)
 summary(hier_model1)
 
 
-hier_model2 <- lmer(logppm~mgstr_c+bulk_fac+source_fac+(1|state/USA_region),data=streetrx_morphine)
+# hier_model2 <- lmer(logppm~mgstr_c+bulk_fac+source_fac+(1|state/USA_region),data=streetrx_morphine)
+# summary(hier_model2)
+
+hier_model2 <- lmer(logppm~mgstr_c+bulk_fac+source_fac+(1|state)+
+                       (1|USA_region),data=streetrx_morphine)
+
 summary(hier_model2)
+
 
 AIC(hier_model1)
 AIC(hier_model2) #not better, not by region
+anova(hier_model1,hier_model2)
 
 ```
 ```{r}
@@ -379,11 +422,16 @@ anova(hier_model1,hier_model3)
 AIC(hier_model1)
 AIC(hier_model3)
 # AIC much smaller, p<0.05 yes!! varying slope on mgstr_c
+# across states, the slope on mgstr_c is not significantly different (std = 0.088)
+
+# what exactly explains residual std of 0.90? variation across states is too small compared to the variations among each observation. std =0.90.
+
 ```
 
 ```{r}
 plot(hier_model3)
 plot(streetrx_morphine$mgstr_c,residuals(hier_model3))
+qqnorm(residuals(hier_model3))
 ```
 ```{r}
 hier_model4 <- lmer(logppm~mgstr_c+bulk_fac+source_fac+(mgstr_c+bulk_fac|state),data=streetrx_morphine)
@@ -401,6 +449,50 @@ AIC(hier_model5)
 anova(hier_model3,hier_model5) 
 ```
 
+
 ```{r}
-dotplot(ranef(hier_model3,condVar=TRUE))$state
+finalmodel <- hier_model3
+summary(finalmodel)
+#confint(finalmodel)
+dotplot(ranef(finalmodel,condVar=TRUE))$state
+
 ```
+```{r}
+# how do we make senese f these confidence intervals?
+# what is .sig02, sig03,
+confint(finalmodel)
+
+```
+```{r}
+# outliers
+```
+
+
+
+```{r}
+exp(fixef(finalmodel))
+# coef(summary(finalmodel))
+```
+
+
+```{r}
+
+rand_effects <- ranef(finalmodel,condVar=TRUE)$state
+rand_effects[c("Massachusetts","Michigan","North Carolina"),]
+basline <-exp(fixef(finalmodel)[1]+rand_intercept[c("Massachusetts","Michigan","North Carolina"),"(Intercept)"])
+mgstr_effects <- exp(fixef(finalmodel)[2]+rand_effects[c("Massachusetts","Michigan","North Carolina"),"mgstr_c"])
+
+data.frame(state =c("Massachusetts","Michigan","North Carolina"), basline=basline,mgstr_effects=mgstr_effects)
+```
+Average ppm of morphine in the U.S. is 0.40.
+
+For any morphine purchased in MA, source = Heard it, bulk =No, mgstr_c = avg, the baseline ppm (price per milligram) is 0.47, higher than the national average price
+
+The baseline ppm in NC is 0.31
+
+For any morphine purchased in MA, a 1 unit increase in mgstr reduces the ppm by a multiplicative effect of 0.78, that is about a 0.22 reduction, lower than the average effect of mgstr_c in the U.S.
+
+
+
+
+
