@@ -341,8 +341,51 @@ data.frame(state =c("Massachusetts","Michigan","North Carolina"), basline=baslin
 # For any morphine purchased in MA, source = Heard it, bulk =No, mgstr_c = avg, the baseline ppm (price per milligram) is 0.47, higher than the national average price
 # The baseline ppm in NC is 0.31
 # For any morphine purchased in MA, a 1 unit increase in mgstr reduces the ppm by a multiplicative effect of 0.78, that is about a 0.22 reduction, lower than the average effect of mgstr_c in the U.S.
-# 
-# 
-# 
-# 
-# 
+
+
+# prediction
+predictdataNC <- data.frame(mgstr_c=round(seq(min(streetrx_morphine$mgstr_c),max(streetrx_morphine$mgstr_c),0.1),2))
+predictdataNC$source_fac <- "Heard it"
+predictdataNC$bulk_fac <- "No"
+predictdataNC$state <- "North Carolina"
+predictdataNC$predict_logppm <-predict(finalmodel,predictdataNC)
+
+predictdataMA <- data.frame(mgstr_c=round(seq(min(streetrx_morphine$mgstr_c),max(streetrx_morphine$mgstr_c),0.1),2))
+predictdataMA$source_fac <- "Heard it"
+predictdataMA$bulk_fac <- "No"
+predictdataMA$state <- "Massachusetts"
+predictdataMA$predict_logppm <-predict(finalmodel,predictdataMA)
+  
+predictdataMI <- data.frame(mgstr_c=round(seq(min(streetrx_morphine$mgstr_c),max(streetrx_morphine$mgstr_c),0.1),2))
+predictdataMI$source_fac <- "Heard it"
+predictdataMI$bulk_fac <- "Yes"
+predictdataMI$state <- "Michigan"
+predictdataMI$predict_logppm <-predict(finalmodel,predictdataMI)
+
+predictdataSC <- data.frame(mgstr_c=round(seq(min(streetrx_morphine$mgstr_c),max(streetrx_morphine$mgstr_c),0.1),2))
+predictdataSC$source_fac <- "Heard it"
+predictdataSC$bulk_fac <- "No"
+predictdataSC$state <- "South Carolina"
+predictdataSC$predict_logppm <-predict(finalmodel,predictdataSC)
+
+predictdataOK <- data.frame(mgstr_c=round(seq(min(streetrx_morphine$mgstr_c),max(streetrx_morphine$mgstr_c),0.1),2))
+predictdataOK$source_fac <- "Heard it"
+predictdataOK$bulk_fac <- "No"
+predictdataOK$state <- "Oklahoma"
+predictdataOK$predict_logppm <-predict(finalmodel,predictdataOK)
+
+predictdataSD <- data.frame(mgstr_c=round(seq(min(streetrx_morphine$mgstr_c),max(streetrx_morphine$mgstr_c),0.1),2))
+predictdataSD$source_fac <- "Heard it"
+predictdataSD$bulk_fac <- "No"
+predictdataSD$state <- "South Dakota"
+predictdataSD$predict_logppm <-predict(finalmodel,predictdataSD)
+
+predictdataCA <- data.frame(mgstr_c=round(seq(min(streetrx_morphine$mgstr_c),max(streetrx_morphine$mgstr_c),0.1),2))
+predictdataCA$source_fac <- "Heard it"
+predictdataCA$bulk_fac <- "No"
+predictdataCA$state <- "California"
+predictdataCA$predict_logppm <-predict(finalmodel,predictdataCA)
+
+predictdata <- bind_rows(list(predictdataNC,predictdataMA,predictdataMI,predictdataOK, predictdataSC,predictdataSD,predictdataCA))
+
+ggplot(data=predictdata, aes(x = mgstr_c, y = predict_logppm,group=state,color=state))+geom_line()
