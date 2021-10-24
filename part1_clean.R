@@ -20,7 +20,7 @@ streetrx_morphine$state <- ifelse(streetrx_morphine$state=="USA","Unknown",as.ch
 streetrx_morphine<-streetrx_morphine %>%filter(streetrx_morphine$state!="")
 
 nrow(streetrx_morphine)
-head(streetrx_morphine)
+summary(streetrx_morphine)
 
 
 streetrx_morphine$logppm<-log(streetrx_morphine$ppm) # add a logppm column
@@ -31,6 +31,9 @@ streetrx_morphine$source_rename <- ifelse(streetrx_morphine$source%in%c("Persona
 streetrx_morphine$source_fac <- factor(streetrx_morphine$source_rename)
 streetrx_morphine$form_fac <- factor(streetrx_morphine$form_temp)
 levels(streetrx_morphine$form_fac)
+
+summary(streetrx_morphine)
+# TALK ABOUT THIS IN EDA (number of obs, balance, unknowns)
 
 ################################################
 ###explore the response variable, price per milogram
