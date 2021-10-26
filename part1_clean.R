@@ -1,3 +1,4 @@
+
 library(ggplot2)
 library(dplyr)
 library(lme4)
@@ -409,5 +410,3 @@ predictdataCA$predict_logppm <-predict(finalmodel,predictdataCA)
 predictdata <- bind_rows(list(predictdataNC,predictdataMA,predictdataMI,predictdataOK, predictdataSC,predictdataSD,predictdataCA))
 
 ggplot(data=predictdata, aes(x = mgstr_c, y = predict_logppm,group=state,color=state))+geom_line()+labs(title="Predicted log(ppm) by State",
-                                                                                                        x="mgstr",y="log(ppm)")
-
