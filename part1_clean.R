@@ -4,8 +4,14 @@ library(lme4)
 library(stargazer)
 library(lattice)
 library(caret)
-# library(influence.ME) 
+library(influence.ME) 
+library(sjPlot)
+library(texreg)
+library(rrtable)
 
+####################################################################3
+####################################################################
+################# Part I #####################################
 load("./Data/streetrx.RData")
 head(streetrx)
 colnames(streetrx)
@@ -24,7 +30,7 @@ head(streetrx_morphine)
 
 
 streetrx_morphine$logppm<-log(streetrx_morphine$ppm) # add a logppm column
-streetrx_morphine$mgstr_c <- scale(streetrx_morphine$mgstr) #center mgstr
+streetrx_morphine$mgstr_c <- streetrx_morphine$mgstr-mean(streetrx_morphine$mgstr) #center mgstr
 #factorize categorical variable: source, form_temp and bulk_purchase
 streetrx_morphine$bulk_fac <- factor(streetrx_morphine$bulk_purchase,levels=c("0 Not bulk purchase","1 Bulk purchase"),labels=c("No","Yes"))
 streetrx_morphine$source_rename <- ifelse(streetrx_morphine$source%in%c("Personal","Heard it","Internet","Internet Pharmacy","Unknown"),as.character(streetrx_morphine$source),"Internet")
@@ -221,7 +227,6 @@ ggplot(streetrx_morphine[is.element(streetrx_morphine$state,names(sample_state10
 
 ###
 #interaction between variables other than states and region
-#interaction between variables:
 ggplot(streetrx_morphine,
        aes(x=mgstr, y=logppm, fill=bulk_fac)) +
   geom_point() +geom_smooth(method="lm",col="red3")+
@@ -247,7 +252,7 @@ ggplot(streetrx_morphine,aes(x=bulk_fac, y=logppm, fill=form_fac)) +
   facet_wrap(~source_fac)
 
 ############################################3
-########Model
+########Modeling
 
 ###
 ##baseline
@@ -263,15 +268,19 @@ plot(streetrx_morphine$mgstr_c,baseline$residuals)
 #AIC select variables
 nullModel<- lm(logppm~1,data= streetrx_morphine)
 fullModel <- lm(logppm~mgstr_c+source_fac+form_fac+bulk_fac+mgstr_c:source_fac+mgstr_c:bulk_fac+source_fac:bulk_fac,data=streetrx_morphine)
-stepwise <- step(nullModel,scope = formula(fullModel),direction="both",trace=0)
+stepwise <- step(nullModel,scope = formula(fullModel),direction="both",trace=0)#,k=log(nrow(streetrx_morphine)))
 stepwise$call
 # our EDA suggests bulk_fac might not be a significant factor, let's to a Anova F test to confirm if bulk_fac is really needed
 model1 <- lm(formula = logppm ~ mgstr_c + bulk_fac + source_fac, data = streetrx_morphine)
 model2 <- lm(formula = logppm ~ mgstr_c +  source_fac, data = streetrx_morphine)
 anova(model1,model2)#anova F test: yes
-# check if sourc_fac is really significant:yes
+# check if source_fac is really significant:yes
 model3 <- lm(formula = logppm ~ mgstr_c +  bulk_fac, data = streetrx_morphine)
 anova(model1,model3)
+
+resall <- data.frame(fitted = predict(model3),res = residuals(model3),mgstr_c = streetrx_morphine$mgstr_c)
+ggplot(resall, aes(x=fitted,y=res))+geom_point(alpha=I(0.1))+geom_smooth(method="lm",col="red3")+labs(title="Fitted VS Residual")
+
 
 summary(model1)
 plot(model1)
@@ -294,11 +303,13 @@ summary(hier_model1)
 hier_model2 <- lmer(logppm~mgstr_c+bulk_fac+source_fac+(1|state)+
                       (1|USA_region),data=streetrx_morphine)
 summary(hier_model2)
+
+hier_model21 <- lmer(logppm~mgstr_c+bulk_fac+source_fac+
+                      (1|USA_region),data=streetrx_morphine)
+summary(hier_model21)
 AIC(hier_model1)
 AIC(hier_model2) #not better, random interepct with state only
-anova(hier_model1,hier_model2)
-
-
+AIC(hier_model21)
 # 3) random slope on mgstr_c
 hier_model3 <- lmer(logppm~mgstr_c+bulk_fac+source_fac+(mgstr_c|state),data=streetrx_morphine)
 summary(hier_model3)
@@ -315,7 +326,7 @@ summary(hier_model4)
 AIC(hier_model4)
 anova(hier_model3,hier_model4) # won't add bulk
 
-# 5) add randome slope for source?
+# 5) add random slope for source?
 hier_model5 <- lmer(logppm~mgstr_c+bulk_fac+source_fac+(mgstr_c+source_fac|state),data=streetrx_morphine)
 summary(hier_model5)
 AIC(hier_model5)
@@ -324,63 +335,72 @@ anova(hier_model3,hier_model5)  # no
 ########
 #final model
 finalmodel <- hier_model3
+resall <- data.frame(fitted = predict(finalmodel),res = residuals(finalmodel),mgstr_c = streetrx_morphine$mgstr_c)
+ggplot(resall, aes(x=fitted,y=res))+geom_point(alpha=I(0.1))+geom_smooth(method="lm",col="red3")+labs(title="Fitted VS Residual of state X")
+
 plot(finalmodel)
 plot(streetrx_morphine$mgstr_c,residuals(finalmodel))
-qqnorm(residuals(hier_model3))
+
+mi <- seq(1,nrow(streetrx_morphine),1)[streetrx_morphine$state=="Michigan"]
+res <- data.frame(fitted = predict(finalmodel),res = residuals(finalmodel),mgstr_c = streetrx_morphine$mgstr_c)[mi,]
+ggplot(res, aes(x=fitted,y=res))+geom_point()+geom_smooth(method="lm",col="red3")+labs(title="Fitted VS Residual of state X")
+
+stargazer(hier_model3,report="v*c*s*p",ci=T)#,type="text")
+model_html <- tab_model(finalmodel,file = "temp.html")
 summary(finalmodel)
-#confint(finalmodel)##???
+confint(finalmodel)##???
 dotplot(ranef(finalmodel,condVar=TRUE))$state
+# check outliers by cook's distance
+# infl <- influence(finalmodel, obs = TRUE)
+# plot(infl, which = "cook",xlab="Cook's distance")
 
 # interpretation
+fixef(finalmodel)
+1-exp(fixef(finalmodel))
 rand_effects <- ranef(finalmodel,condVar=TRUE)$state
 rand_effects[c("Massachusetts","Michigan","North Carolina"),]# look at a few examples
 basline <-exp(fixef(finalmodel)[1]+rand_effects[c("Massachusetts","Michigan","North Carolina"),"(Intercept)"])
 mgstr_effects <- exp(fixef(finalmodel)[2]+rand_effects[c("Massachusetts","Michigan","North Carolina"),"mgstr_c"])
 data.frame(state =c("Massachusetts","Michigan","North Carolina"), basline=basline,`mgstr_c(multiplicative effect)`=mgstr_effects)
-# Average ppm of morphine in the U.S. is 0.40.
-# For any morphine purchased in MA, source = Heard it, bulk =No, mgstr_c = avg, the baseline ppm (price per milligram) is 0.47, higher than the national average price
-# The baseline ppm in NC is 0.31
-# For any morphine purchased in MA, a 1 unit increase in mgstr reduces the ppm by a multiplicative effect of 0.78, that is about a 0.22 reduction, lower than the average effect of mgstr_c in the U.S.
-
 
 # prediction
-predictdataNC <- data.frame(mgstr_c=round(seq(min(streetrx_morphine$mgstr_c),max(streetrx_morphine$mgstr_c),0.1),2))
+predictdataNC <- data.frame(mgstr_c=round(seq(min(streetrx_morphine$mgstr),max(streetrx_morphine$mgstr),0.1),2))
 predictdataNC$source_fac <- "Heard it"
 predictdataNC$bulk_fac <- "No"
 predictdataNC$state <- "North Carolina"
 predictdataNC$predict_logppm <-predict(finalmodel,predictdataNC)
 
-predictdataMA <- data.frame(mgstr_c=round(seq(min(streetrx_morphine$mgstr_c),max(streetrx_morphine$mgstr_c),0.1),2))
+predictdataMA <- data.frame(mgstr_c=round(seq(min(streetrx_morphine$mgstr),max(streetrx_morphine$mgstr),0.1),2))
 predictdataMA$source_fac <- "Heard it"
 predictdataMA$bulk_fac <- "No"
 predictdataMA$state <- "Massachusetts"
 predictdataMA$predict_logppm <-predict(finalmodel,predictdataMA)
   
-predictdataMI <- data.frame(mgstr_c=round(seq(min(streetrx_morphine$mgstr_c),max(streetrx_morphine$mgstr_c),0.1),2))
+predictdataMI <- data.frame(mgstr_c=round(seq(min(streetrx_morphine$mgstr),max(streetrx_morphine$mgstr),0.1),2))
 predictdataMI$source_fac <- "Heard it"
 predictdataMI$bulk_fac <- "Yes"
 predictdataMI$state <- "Michigan"
 predictdataMI$predict_logppm <-predict(finalmodel,predictdataMI)
 
-predictdataSC <- data.frame(mgstr_c=round(seq(min(streetrx_morphine$mgstr_c),max(streetrx_morphine$mgstr_c),0.1),2))
+predictdataSC <- data.frame(mgstr_c=round(seq(min(streetrx_morphine$mgstr),max(streetrx_morphine$mgstr),0.1),2))
 predictdataSC$source_fac <- "Heard it"
 predictdataSC$bulk_fac <- "No"
 predictdataSC$state <- "South Carolina"
 predictdataSC$predict_logppm <-predict(finalmodel,predictdataSC)
 
-predictdataOK <- data.frame(mgstr_c=round(seq(min(streetrx_morphine$mgstr_c),max(streetrx_morphine$mgstr_c),0.1),2))
+predictdataOK <- data.frame(mgstr_c=round(seq(min(streetrx_morphine$mgstr),max(streetrx_morphine$mgstr),0.1),2))
 predictdataOK$source_fac <- "Heard it"
 predictdataOK$bulk_fac <- "No"
 predictdataOK$state <- "Oklahoma"
 predictdataOK$predict_logppm <-predict(finalmodel,predictdataOK)
 
-predictdataSD <- data.frame(mgstr_c=round(seq(min(streetrx_morphine$mgstr_c),max(streetrx_morphine$mgstr_c),0.1),2))
+predictdataSD <- data.frame(mgstr_c=round(seq(min(streetrx_morphine$mgstr),max(streetrx_morphine$mgstr),0.1),2))
 predictdataSD$source_fac <- "Heard it"
 predictdataSD$bulk_fac <- "No"
 predictdataSD$state <- "South Dakota"
 predictdataSD$predict_logppm <-predict(finalmodel,predictdataSD)
 
-predictdataCA <- data.frame(mgstr_c=round(seq(min(streetrx_morphine$mgstr_c),max(streetrx_morphine$mgstr_c),0.1),2))
+predictdataCA <- data.frame(mgstr_c=round(seq(min(streetrx_morphine$mgstr),max(streetrx_morphine$mgstr),0.1),2))
 predictdataCA$source_fac <- "Heard it"
 predictdataCA$bulk_fac <- "No"
 predictdataCA$state <- "California"
@@ -388,4 +408,6 @@ predictdataCA$predict_logppm <-predict(finalmodel,predictdataCA)
 
 predictdata <- bind_rows(list(predictdataNC,predictdataMA,predictdataMI,predictdataOK, predictdataSC,predictdataSD,predictdataCA))
 
-ggplot(data=predictdata, aes(x = mgstr_c, y = predict_logppm,group=state,color=state))+geom_line()
+ggplot(data=predictdata, aes(x = mgstr_c, y = predict_logppm,group=state,color=state))+geom_line()+labs(title="Predicted log(ppm) by State",
+                                                                                                        x="mgstr",y="log(ppm)")
+
